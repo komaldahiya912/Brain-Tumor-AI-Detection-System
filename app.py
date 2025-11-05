@@ -18,8 +18,8 @@ import io
 def load_predictor():
     """Load the predictor with trained models"""
     return BrainTumorPredictor(
-        seg_model_path='C:/Users/komal/brain_tumour_project/patients_images/brain_tumor_app/models/resnet_segmentation_model.pth',
-        quantum_model_path='C:/Users/komal/brain_tumour_project/patients_images/brain_tumor_app/models/quantum_classifier_fixed.pth'
+        seg_model_path='resnet_segmentation_model.pth',
+        quantum_model_path='quantum_classifier_fixed.pth'
     )
 
 @st.cache_resource  
