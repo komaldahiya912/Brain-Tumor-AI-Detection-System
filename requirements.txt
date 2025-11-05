@@ -1,0 +1,8 @@
+streamlit==1.28.0
+torch==2.5.1
+torchvision==0.20.1
+pennylane==0.37.0
+pillow==10.0.0
+pandas==2.0.0
+numpy==1.26.4
+opencv-python==4.8.0.76
