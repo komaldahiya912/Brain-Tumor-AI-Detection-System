@@ -168,7 +168,7 @@ def main():
             with col1:
                 st.subheader("Original MRI Scan")
                 original_img = Image.open(upload_path).convert('L')
-                st.image(original_img, use_container_width=True)
+                st.image(np.array(original_img), use_container_width=True)
             
             if st.button("Analyze MRI Scan", type="primary"):
                 with st.spinner("Running AI analysis... This may take a moment..."):
