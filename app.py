@@ -284,6 +284,22 @@ def main():
     
     elif page == "Prediction History":
         st.header("Prediction History")
+        
+        # Search by Patient ID
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search_id = st.text_input(
+                "🔍 Search by Patient ID", 
+                placeholder="Enter Patient ID to search (e.g., 1, 2, 3...)",
+                help="Enter the ID number to find a specific patient record"
+            )
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            clear_search = st.button("Clear Search")
+        
+        if clear_search:
+            search_id = ""
+        
         try:
             predictions = db.get_all_predictions()
             
@@ -300,7 +316,41 @@ def main():
                         'Area (px)': f"{pred[7]:.0f}"
                     })
                 df = pd.DataFrame(df_data)
-                st.dataframe(df, hide_index=True)
+                
+                # Filter by search ID if provided
+                if search_id:
+                    try:
+                        search_id_int = int(search_id)
+                        filtered_df = df[df['ID'] == search_id_int]
+                        
+                        if not filtered_df.empty:
+                            st.success(f"✅ Found 1 record with Patient ID: {search_id_int}")
+                            st.dataframe(filtered_df, hide_index=True)
+                            
+                            # Show detailed info for searched patient
+                            st.markdown("---")
+                            st.subheader("Patient Details")
+                            record = filtered_df.iloc[0]
+                            detail_col1, detail_col2, detail_col3 = st.columns(3)
+                            with detail_col1:
+                                st.metric("Patient Name", record['Patient'])
+                                st.metric("Analysis Date", record['Date'])
+                            with detail_col2:
+                                st.metric("Tumor Status", record['Tumor'])
+                                st.metric("Tumor Grade", record['Grade'])
+                            with detail_col3:
+                                st.metric("Confidence", record['Confidence'])
+                                st.metric("Tumor Area", record['Area (px)'])
+                        else:
+                            st.warning(f"❌ No record found with Patient ID: {search_id_int}")
+                            st.info("Showing all records below:")
+                            st.dataframe(df, hide_index=True)
+                    except ValueError:
+                        st.error("⚠️ Please enter a valid numeric Patient ID")
+                        st.dataframe(df, hide_index=True)
+                else:
+                    st.info("Showing all patient records. Use search box above to find specific Patient ID.")
+                    st.dataframe(df, hide_index=True)
                 
                 st.markdown("---")
                 st.subheader("Summary Statistics")
