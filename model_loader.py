@@ -9,7 +9,36 @@ import os
 import gdown
 import streamlit as st
 
-# Define the segmentation model architecture
+# Attention Block for the segmentation model
+class AttentionBlock(nn.Module):
+    def __init__(self, F_g, F_l, F_int):
+        super(AttentionBlock, self).__init__()
+        self.W_g = nn.Sequential(
+            nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int)
+        )
+        
+        self.W_x = nn.Sequential(
+            nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(F_int)
+        )
+        
+        self.psi = nn.Sequential(
+            nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(1),
+            nn.Sigmoid()
+        )
+        
+        self.relu = nn.ReLU(inplace=True)
+        
+    def forward(self, g, x):
+        g1 = self.W_g(g)
+        x1 = self.W_x(x)
+        psi = self.relu(g1 + x1)
+        psi = self.psi(psi)
+        return x * psi
+
+# Define the segmentation model architecture (matching saved model)
 class ImprovedResUNet(nn.Module):
     def __init__(self, num_classes=1):
         super(ImprovedResUNet, self).__init__()
@@ -17,82 +46,88 @@ class ImprovedResUNet(nn.Module):
         # Load pretrained ResNet50
         resnet = models.resnet50(pretrained=False)
         
-        # Encoder
-        self.encoder1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu)
-        self.encoder2 = nn.Sequential(resnet.maxpool, resnet.layer1)
-        self.encoder3 = resnet.layer2
-        self.encoder4 = resnet.layer3
-        self.encoder5 = resnet.layer4
+        # Encoder - store as direct attributes
+        self.conv1 = resnet.conv1
+        self.bn1 = resnet.bn1
+        self.relu = resnet.relu
+        self.maxpool = resnet.maxpool
+        self.layer1 = resnet.layer1
+        self.layer2 = resnet.layer2
+        self.layer3 = resnet.layer3
+        self.layer4 = resnet.layer4
         
-        # Bridge
-        self.bridge = nn.Sequential(
-            nn.Conv2d(2048, 2048, kernel_size=3, padding=1),
-            nn.BatchNorm2d(2048),
+        # Attention gates
+        self.att4 = AttentionBlock(1024, 1024, 512)
+        self.att3 = AttentionBlock(512, 512, 256)
+        self.att2 = AttentionBlock(256, 256, 128)
+        
+        # Decoder
+        self.up1 = nn.Sequential(
+            nn.ConvTranspose2d(2048, 1024, kernel_size=2, stride=2),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(inplace=True)
+        )
+        self.up2 = nn.Sequential(
+            nn.Conv2d(2048, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+        )
+        self.up3 = nn.Sequential(
+            nn.Conv2d(1024, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True)
+        )
+        self.up4 = nn.Sequential(
+            nn.Conv2d(512, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True)
+        )
+        self.up5 = nn.Sequential(
+            nn.Conv2d(192, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True)
         )
         
-        # Decoder
-        self.upconv5 = nn.ConvTranspose2d(2048, 1024, kernel_size=2, stride=2)
-        self.decoder5 = self._make_decoder_block(2048, 1024)
-        
-        self.upconv4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
-        self.decoder4 = self._make_decoder_block(1024, 512)
-        
-        self.upconv3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.decoder3 = self._make_decoder_block(512, 256)
-        
-        self.upconv2 = nn.ConvTranspose2d(256, 64, kernel_size=2, stride=2)
-        self.decoder2 = self._make_decoder_block(128, 64)
-        
-        self.upconv1 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
-        self.decoder1 = self._make_decoder_block(128, 64)
-        
         # Final output
-        self.final = nn.Conv2d(64, num_classes, kernel_size=1)
-        
-    def _make_decoder_block(self, in_channels, out_channels):
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+        self.final = nn.Sequential(
+            nn.Conv2d(64, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.Conv2d(32, num_classes, kernel_size=1)
         )
     
     def forward(self, x):
         # Encoder
-        enc1 = self.encoder1(x)
-        enc2 = self.encoder2(enc1)
-        enc3 = self.encoder3(enc2)
-        enc4 = self.encoder4(enc3)
-        enc5 = self.encoder5(enc4)
+        x1 = self.relu(self.bn1(self.conv1(x)))
+        x2 = self.maxpool(x1)
+        x2 = self.layer1(x2)
+        x3 = self.layer2(x2)
+        x4 = self.layer3(x3)
+        x5 = self.layer4(x4)
         
-        # Bridge
-        bridge = self.bridge(enc5)
+        # Decoder with attention
+        d5 = self.up1(x5)
+        x4_att = self.att4(d5, x4)
+        d5 = torch.cat([d5, x4_att], dim=1)
+        d5 = self.up2(d5)
         
-        # Decoder with skip connections
-        dec5 = self.upconv5(bridge)
-        dec5 = torch.cat([dec5, enc4], dim=1)
-        dec5 = self.decoder5(dec5)
+        d4 = nn.functional.interpolate(d5, scale_factor=2, mode='bilinear', align_corners=True)
+        x3_att = self.att3(d4, x3)
+        d4 = torch.cat([d4, x3_att], dim=1)
+        d4 = self.up3(d4)
         
-        dec4 = self.upconv4(dec5)
-        dec4 = torch.cat([dec4, enc3], dim=1)
-        dec4 = self.decoder4(dec4)
+        d3 = nn.functional.interpolate(d4, scale_factor=2, mode='bilinear', align_corners=True)
+        x2_att = self.att2(d3, x2)
+        d3 = torch.cat([d3, x2_att], dim=1)
+        d3 = self.up4(d3)
         
-        dec3 = self.upconv3(dec4)
-        dec3 = torch.cat([dec3, enc2], dim=1)
-        dec3 = self.decoder3(dec3)
+        d2 = nn.functional.interpolate(d3, scale_factor=2, mode='bilinear', align_corners=True)
+        d2 = torch.cat([d2, x1], dim=1)
+        d2 = self.up5(d2)
         
-        dec2 = self.upconv2(dec3)
-        dec2 = torch.cat([dec2, enc1], dim=1)
-        dec2 = self.decoder2(dec2)
+        d1 = nn.functional.interpolate(d2, scale_factor=2, mode='bilinear', align_corners=True)
         
-        dec1 = self.upconv1(dec2)
-        dec1 = torch.cat([dec1, x], dim=1)
-        dec1 = self.decoder1(dec1)
-        
-        return torch.sigmoid(self.final(dec1))
+        return torch.sigmoid(self.final(d1))
 
 
 # Define the quantum classifier
@@ -155,22 +190,28 @@ class BrainTumorPredictor:
         # Load segmentation model
         self.seg_model = ImprovedResUNet(num_classes=1)
         if os.path.exists(seg_model_path):
-            checkpoint = torch.load(seg_model_path, map_location=self.device)
-            if 'model_state_dict' in checkpoint:
-                self.seg_model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                self.seg_model.load_state_dict(checkpoint)
+            try:
+                checkpoint = torch.load(seg_model_path, map_location=self.device)
+                if 'model_state_dict' in checkpoint:
+                    self.seg_model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    self.seg_model.load_state_dict(checkpoint)
+            except Exception as e:
+                st.error(f"Error loading segmentation model: {str(e)}")
         self.seg_model.to(self.device)
         self.seg_model.eval()
         
         # Load quantum classifier
         self.quantum_model = QuantumClassifier(n_qubits=4, n_layers=2)
         if os.path.exists(quantum_model_path):
-            checkpoint = torch.load(quantum_model_path, map_location=self.device)
-            if 'model_state_dict' in checkpoint:
-                self.quantum_model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                self.quantum_model.load_state_dict(checkpoint)
+            try:
+                checkpoint = torch.load(quantum_model_path, map_location=self.device)
+                if 'model_state_dict' in checkpoint:
+                    self.quantum_model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    self.quantum_model.load_state_dict(checkpoint)
+            except Exception as e:
+                st.error(f"Error loading quantum model: {str(e)}")
         self.quantum_model.to(self.device)
         self.quantum_model.eval()
         
@@ -288,5 +329,3 @@ def download_models():
             return False
     
     return True
-
-
