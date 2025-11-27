@@ -12,7 +12,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from skimage.transform import resize
 import io
+from download_models import download_models
 
+# Download models before anything else
+if not download_models():
+    st.stop()
 # Initialize
 @st.cache_resource
 def load_predictor():
