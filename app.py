@@ -1,3 +1,25 @@
+"""
+Brain Tumor AI Detection System using Res-U-Net and quantum computing
+Copyright (C) 2025 Komal Dahiya
+B.Tech CSE (AI & Data Science)
+Panipat Institute of Engineering & Technology
+
+This program is free software: you can redistribute it and/or modify 
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+GitHub: https://github.com/komaldahiya912/Brain-Tumor-AI-Detection-System
+"""
+
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -12,15 +34,20 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from skimage.transform import resize
 import io
-import gdown
 
 # Download models from Google Drive
 def download_models():
     """Download models from Google Drive if not present"""
+    try:
+        # Get model IDs from Streamlit secrets (secure method)
+        SEG_MODEL_ID = st.secrets.get("SEG_MODEL_ID", "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R")
+        QUANTUM_MODEL_ID = st.secrets.get("QUANTUM_MODEL_ID", "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs")
+    except:
+        # Fallback to default values if secrets not configured
+        SEG_MODEL_ID = "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R"
+        QUANTUM_MODEL_ID = "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs"
     
-    # REPLACE THESE WITH YOUR ACTUAL GOOGLE DRIVE FILE IDs
-    SEG_MODEL_ID = "1ABC123XYZ456"
-    QUANTUM_MODEL_ID = "1DEF789GHI012"
+    import gdown
     
     seg_model_path = 'resnet_segmentation_model.pth'
     quantum_model_path = 'quantum_classifier_fixed.pth'
@@ -28,24 +55,24 @@ def download_models():
     # Download segmentation model
     if not os.path.exists(seg_model_path):
         try:
-            st.info("📥 Downloading segmentation model (first time only, ~100MB)...")
+            st.info("Downloading segmentation model (first time only, ~100MB)...")
             url = f'https://drive.google.com/uc?id={SEG_MODEL_ID}'
             gdown.download(url, seg_model_path, quiet=False)
-            st.success("✅ Segmentation model downloaded!")
+            st.success("Segmentation model downloaded!")
         except Exception as e:
-            st.error(f"❌ Failed to download segmentation model: {str(e)}")
+            st.error(f"Failed to download segmentation model: {str(e)}")
             st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
             return False
     
     # Download quantum model
     if not os.path.exists(quantum_model_path):
         try:
-            st.info("📥 Downloading quantum classifier (first time only, ~3MB)...")
+            st.info("Downloading quantum classifier (first time only, ~3MB)...")
             url = f'https://drive.google.com/uc?id={QUANTUM_MODEL_ID}'
             gdown.download(url, quantum_model_path, quiet=False)
-            st.success("✅ Quantum classifier downloaded!")
+            st.success("Quantum classifier downloaded!")
         except Exception as e:
-            st.error(f"❌ Failed to download quantum model: {str(e)}")
+            st.error(f"Failed to download quantum model: {str(e)}")
             st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
             return False
     
@@ -101,7 +128,7 @@ def create_overlay_image(original_img, tumor_mask, alpha=0.5):
         return None
 
 def generate_pdf_report(patient_name, results, original_img, tumor_mask):
-    """Generate PDF report"""
+    """Generate PDF report with copyright watermark"""
     try:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -141,6 +168,20 @@ def generate_pdf_report(patient_name, results, original_img, tumor_mask):
             img = RLImage(overlay_buf, width=400, height=400)
             story.append(img)
         
+        story.append(Spacer(1, 30))
+        
+        # Copyright watermark
+        copyright_text = """
+        <br/><br/>
+        ───────────────────────────────────────────────────────────<br/>
+        <b>Brain Tumor AI Detection System © 2025 Komal Dahiya</b><br/>
+        <i>Powered by Deep Learning & Quantum Computing</i><br/>
+        GitHub: github.com/komaldahiya912/Brain-Tumor-AI-Detection-System<br/>
+        <i>Licensed under GNU GPL-3.0</i><br/>
+        ───────────────────────────────────────────────────────────
+        """
+        story.append(Paragraph(copyright_text, styles['Normal']))
+        
         doc.build(story)
         buffer.seek(0)
         return buffer
@@ -163,7 +204,7 @@ def main():
         1. Upload your model files to Google Drive
         2. Right-click each file → Share → Set to 'Anyone with the link'
         3. Copy the file ID from the share link
-        4. Update the file IDs in the code (lines 19-20)
+        4. Add them to Streamlit secrets (Settings → Secrets)
         """)
         st.stop()
     
@@ -200,6 +241,7 @@ def main():
     <div style="text-align: center; color: #666; padding: 20px;">
     <p><b>Brain Tumor AI Detection System v1.0</b></p>
     <p>Powered by Deep Learning & Quantum Computing</p>
+    <p style="font-size: 0.8em;">© 2024 Komal Dahiya | Licensed under GPL-3.0</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -315,37 +357,37 @@ def main():
                             
                             if pdf_buffer:
                                 st.download_button(
-                                    "📥 Download PDF Report",
+                                    "Download PDF Report",
                                     data=pdf_buffer.getvalue(),
                                     file_name=f"{patient_name.replace(' ', '_')}_brain_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                                     mime="application/pdf"
                                 )
                             
-                            st.success(f"✅ Analysis complete! Saved to database with ID: {prediction_id}")
-                            st.warning("⚠️ Important: This is an AI research system. Results should be verified by medical professionals before any clinical decision.")
+                            st.success(f"Analysis complete! Saved to database with ID: {prediction_id}")
+                            st.warning("Important: This is an AI research system. Results should be verified by medical professionals before any clinical decision.")
                             
                         except Exception as e:
-                            st.error(f"❌ Analysis failed: {str(e)}")
+                            st.error(f"Analysis failed: {str(e)}")
                             st.exception(e)
             
             except Exception as e:
-                st.error(f"❌ Error processing file: {str(e)}")
+                st.error(f"Error processing file: {str(e)}")
         
         elif not patient_name and not uploaded_file:
-            st.info("ℹ️ Please enter patient name and upload an MRI scan to begin analysis.")
+            st.info("Please enter patient name and upload an MRI scan to begin analysis.")
         elif not patient_name:
-            st.warning("⚠️ Please enter patient name.")
+            st.warning("Please enter patient name.")
         elif not uploaded_file:
-            st.warning("⚠️ Please upload an MRI scan.")
+            st.warning("Please upload an MRI scan.")
     
     elif page == "Prediction History":
-        st.header("📊 Prediction History")
+        st.header("Prediction History")
         
         # Search by Patient ID
         col1, col2 = st.columns([3, 1])
         with col1:
             search_id = st.text_input(
-                "🔍 Search by Patient ID", 
+                "Search by Patient ID", 
                 placeholder="Enter Patient ID to search (e.g., 1, 2, 3...)",
                 help="Enter the ID number to find a specific patient record",
                 key="search_input"
@@ -379,7 +421,7 @@ def main():
                         filtered_df = df[df['ID'] == search_id_int]
                         
                         if not filtered_df.empty:
-                            st.success(f"✅ Found 1 record with Patient ID: {search_id_int}")
+                            st.success(f"Found 1 record with Patient ID: {search_id_int}")
                             st.dataframe(filtered_df, hide_index=True, use_container_width=True)
                             
                             # Show detailed info for searched patient
@@ -397,18 +439,18 @@ def main():
                                 st.metric("Confidence", record['Confidence'])
                                 st.metric("Tumor Area", record['Area (px)'])
                         else:
-                            st.warning(f"❌ No record found with Patient ID: {search_id_int}")
+                            st.warning(f"No record found with Patient ID: {search_id_int}")
                             st.info("Showing all records below:")
                             st.dataframe(df, hide_index=True, use_container_width=True)
                     except ValueError:
-                        st.error("⚠️ Please enter a valid numeric Patient ID")
+                        st.error("Please enter a valid numeric Patient ID")
                         st.dataframe(df, hide_index=True, use_container_width=True)
                 else:
-                    st.info("ℹ️ Showing all patient records. Use search box above to find specific Patient ID.")
+                    st.info("Showing all patient records. Use search box above to find specific Patient ID.")
                     st.dataframe(df, hide_index=True, use_container_width=True)
                 
                 st.markdown("---")
-                st.subheader("📈 Summary Statistics")
+                st.subheader("Summary Statistics")
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Total Scans", len(predictions))
@@ -432,7 +474,7 @@ def main():
                         st.metric("Avg Confidence", "N/A")
                 
                 if tumor_count > 0:
-                    st.subheader("📊 Grade Distribution")
+                    st.subheader("Grade Distribution")
                     grade_data = {}
                     for p in predictions:
                         if p[4]:
@@ -441,13 +483,13 @@ def main():
                     grade_df = pd.DataFrame(list(grade_data.items()), columns=['Grade', 'Count'])
                     st.bar_chart(grade_df.set_index('Grade'))
             else:
-                st.info("ℹ️ No predictions in database yet. Upload an MRI scan to get started!")
+                st.info("No predictions in database yet. Upload an MRI scan to get started!")
         except Exception as e:
-            st.error(f"❌ Error loading history: {str(e)}")
+            st.error(f"Error loading history: {str(e)}")
             st.exception(e)
     
     elif page == "About":
-        st.header("ℹ️ About This System")
+        st.header("About This System")
         
         col1, col2 = st.columns([3, 2])
         
@@ -549,11 +591,23 @@ def main():
             - PennyLane
             - Streamlit
             
-            ### Developer
+            ### Copyright & License
             
-            **Komal Dahiya**
-            B.Tech CSE (AI & Data Science)
+            **© 2025 Komal Dahiya**  
+            B.Tech CSE (AI & Data Science)  
             Panipat Institute of Engineering & Technology
+            
+            Licensed under GNU GPL-3.0  
+            [GitHub Repository](https://github.com/komaldahiya912/Brain-Tumor-AI-Detection-System)
+            
+            ### Citation
+            
+            If you use this system in your research or work, please cite:
+            
+            ```
+            Dahiya, K. (2025). Brain Tumor AI Detection System.
+            GitHub: komaldahiya912/Brain-Tumor-AI-Detection-System
+            ```
             """)
 
 if __name__ == "__main__":
