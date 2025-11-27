@@ -248,7 +248,7 @@ class BrainTumorPredictor:
 def download_models():
     """Download models from Google Drive if not present"""
     
-    # Your actual Google Drive file IDs
+    # Google Drive file IDs
     SEG_MODEL_ID = "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R"
     QUANTUM_MODEL_ID = "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs"
     
@@ -280,3 +280,4 @@ def download_models():
             return False
     
     return True
+
