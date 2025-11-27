@@ -19,8 +19,8 @@ def download_models():
     """Download models from Google Drive if not present"""
     
     # REPLACE THESE WITH YOUR ACTUAL GOOGLE DRIVE FILE IDs
-    SEG_MODEL_ID = "YOUR_SEGMENTATION_MODEL_FILE_ID_HERE"
-    QUANTUM_MODEL_ID = "YOUR_QUANTUM_MODEL_FILE_ID_HERE"
+    SEG_MODEL_ID = "1ABC123XYZ456"
+    QUANTUM_MODEL_ID = "1DEF789GHI012"
     
     seg_model_path = 'resnet_segmentation_model.pth'
     quantum_model_path = 'quantum_classifier_fixed.pth'
