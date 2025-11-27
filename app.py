@@ -17,15 +17,23 @@ import io
 @st.cache_resource
 def load_predictor():
     """Load the predictor with trained models"""
-    return BrainTumorPredictor(
-        seg_model_path='resnet_segmentation_model.pth',
-        quantum_model_path='quantum_classifier_fixed.pth'
-    )
+    try:
+        return BrainTumorPredictor(
+            seg_model_path='resnet_segmentation_model.pth',
+            quantum_model_path='quantum_classifier_fixed.pth'
+        )
+    except Exception as e:
+        st.error(f"Error loading predictor: {str(e)}")
+        return None
 
 @st.cache_resource  
 def load_database():
     """Initialize database"""
-    return PredictionDatabase()
+    try:
+        return PredictionDatabase()
+    except Exception as e:
+        st.error(f"Error loading database: {str(e)}")
+        return None
 
 def create_overlay_image(original_img, tumor_mask, alpha=0.5):
     """Create image with tumor overlay"""
@@ -129,13 +137,13 @@ def main():
     """, unsafe_allow_html=True)
     
     # Load models and database
-    try:
-        predictor = load_predictor()
-        db = load_database()
-    except Exception as e:
-        st.error(f"Error loading models: {str(e)}")
-        st.info("Make sure 'resnet_segmentation_model.pth' and 'quantum_classifier_fixed.pth' are in the models directory.")
-        return
+    predictor = load_predictor()
+    db = load_database()
+    
+    if predictor is None or db is None:
+        st.error("Failed to load models or database. Please check your model files.")
+        st.info("Required files: 'resnet_segmentation_model.pth' and 'quantum_classifier_fixed.pth'")
+        st.stop()
     
     # Header
     st.markdown("""
@@ -178,11 +186,10 @@ def main():
                     st.subheader("Original MRI Scan")
                     try:
                         original_img = Image.open(upload_path).convert('L')
-                        # FIXED: use_column_width instead of use_container_width
                         st.image(np.array(original_img), use_column_width=True)
                     except Exception as e:
                         st.error(f"Error loading image: {str(e)}")
-                        return
+                        st.stop()
                 
                 if st.button("Analyze MRI Scan", type="primary"):
                     with st.spinner("Running AI analysis... This may take a moment..."):
@@ -195,7 +202,6 @@ def main():
                                 original_array = np.array(original_img)
                                 overlay_buf = create_overlay_image(original_array, results['tumor_mask'])
                                 if overlay_buf:
-                                    # FIXED: use_column_width
                                     st.image(overlay_buf, use_column_width=True)
                             
                             st.markdown("---")
@@ -259,31 +265,31 @@ def main():
                             
                             if pdf_buffer:
                                 st.download_button(
-                                    "Download PDF Report",
+                                    "📥 Download PDF Report",
                                     data=pdf_buffer.getvalue(),
                                     file_name=f"{patient_name.replace(' ', '_')}_brain_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                                     mime="application/pdf"
                                 )
                             
-                            st.success(f"Analysis complete! Saved to database with ID: {prediction_id}")
-                            st.warning("Important: This is an AI research system. Results should be verified by medical professionals before any clinical decision.")
+                            st.success(f"✅ Analysis complete! Saved to database with ID: {prediction_id}")
+                            st.warning("⚠️ Important: This is an AI research system. Results should be verified by medical professionals before any clinical decision.")
                             
                         except Exception as e:
-                            st.error(f"Analysis failed: {str(e)}")
+                            st.error(f"❌ Analysis failed: {str(e)}")
                             st.exception(e)
             
             except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
+                st.error(f"❌ Error processing file: {str(e)}")
         
         elif not patient_name and not uploaded_file:
-            st.info("Please enter patient name and upload an MRI scan to begin analysis.")
+            st.info("ℹ️ Please enter patient name and upload an MRI scan to begin analysis.")
         elif not patient_name:
-            st.warning("Please enter patient name.")
+            st.warning("⚠️ Please enter patient name.")
         elif not uploaded_file:
-            st.warning("Please upload an MRI scan.")
+            st.warning("⚠️ Please upload an MRI scan.")
     
     elif page == "Prediction History":
-        st.header("Prediction History")
+        st.header("📊 Prediction History")
         
         # Search by Patient ID
         col1, col2 = st.columns([3, 1])
@@ -291,14 +297,13 @@ def main():
             search_id = st.text_input(
                 "🔍 Search by Patient ID", 
                 placeholder="Enter Patient ID to search (e.g., 1, 2, 3...)",
-                help="Enter the ID number to find a specific patient record"
+                help="Enter the ID number to find a specific patient record",
+                key="search_input"
             )
         with col2:
             st.markdown("<br>", unsafe_allow_html=True)
-            clear_search = st.button("Clear Search")
-        
-        if clear_search:
-            search_id = ""
+            if st.button("Clear Search"):
+                st.rerun()
         
         try:
             predictions = db.get_all_predictions()
@@ -325,7 +330,7 @@ def main():
                         
                         if not filtered_df.empty:
                             st.success(f"✅ Found 1 record with Patient ID: {search_id_int}")
-                            st.dataframe(filtered_df, hide_index=True)
+                            st.dataframe(filtered_df, hide_index=True, use_container_width=True)
                             
                             # Show detailed info for searched patient
                             st.markdown("---")
@@ -344,16 +349,16 @@ def main():
                         else:
                             st.warning(f"❌ No record found with Patient ID: {search_id_int}")
                             st.info("Showing all records below:")
-                            st.dataframe(df, hide_index=True)
+                            st.dataframe(df, hide_index=True, use_container_width=True)
                     except ValueError:
                         st.error("⚠️ Please enter a valid numeric Patient ID")
-                        st.dataframe(df, hide_index=True)
+                        st.dataframe(df, hide_index=True, use_container_width=True)
                 else:
-                    st.info("Showing all patient records. Use search box above to find specific Patient ID.")
-                    st.dataframe(df, hide_index=True)
+                    st.info("ℹ️ Showing all patient records. Use search box above to find specific Patient ID.")
+                    st.dataframe(df, hide_index=True, use_container_width=True)
                 
                 st.markdown("---")
-                st.subheader("Summary Statistics")
+                st.subheader("📈 Summary Statistics")
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("Total Scans", len(predictions))
@@ -377,7 +382,7 @@ def main():
                         st.metric("Avg Confidence", "N/A")
                 
                 if tumor_count > 0:
-                    st.subheader("Grade Distribution")
+                    st.subheader("📊 Grade Distribution")
                     grade_data = {}
                     for p in predictions:
                         if p[4]:
@@ -386,12 +391,13 @@ def main():
                     grade_df = pd.DataFrame(list(grade_data.items()), columns=['Grade', 'Count'])
                     st.bar_chart(grade_df.set_index('Grade'))
             else:
-                st.info("No predictions in database yet. Upload an MRI scan to get started!")
+                st.info("ℹ️ No predictions in database yet. Upload an MRI scan to get started!")
         except Exception as e:
-            st.error(f"Error loading history: {str(e)}")
+            st.error(f"❌ Error loading history: {str(e)}")
+            st.exception(e)
     
     elif page == "About":
-        st.header("About This System")
+        st.header("ℹ️ About This System")
         
         col1, col2 = st.columns([3, 2])
         
