@@ -1,12 +1,9 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-autoray==0.6.7
-pennylane==0.33.1
-numpy==1.24.3
-
 streamlit==1.38.0
 torch==2.5.0
 torchvision==0.20.0
 pennylane==0.38.0
+autoray==0.6.11
 numpy==1.26.4
 Pillow==10.4.0
 matplotlib==3.9.0
