@@ -155,14 +155,22 @@ class BrainTumorPredictor:
         # Load segmentation model
         self.seg_model = ImprovedResUNet(num_classes=1)
         if os.path.exists(seg_model_path):
-            self.seg_model.load_state_dict(torch.load(seg_model_path, map_location=self.device))
+            checkpoint = torch.load(seg_model_path, map_location=self.device)
+            if 'model_state_dict' in checkpoint:
+                self.seg_model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                self.seg_model.load_state_dict(checkpoint)
         self.seg_model.to(self.device)
         self.seg_model.eval()
         
         # Load quantum classifier
         self.quantum_model = QuantumClassifier(n_qubits=4, n_layers=2)
         if os.path.exists(quantum_model_path):
-            self.quantum_model.load_state_dict(torch.load(quantum_model_path, map_location=self.device))
+            checkpoint = torch.load(quantum_model_path, map_location=self.device)
+            if 'model_state_dict' in checkpoint:
+                self.quantum_model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                self.quantum_model.load_state_dict(checkpoint)
         self.quantum_model.to(self.device)
         self.quantum_model.eval()
         
@@ -280,4 +288,5 @@ def download_models():
             return False
     
     return True
+
 
