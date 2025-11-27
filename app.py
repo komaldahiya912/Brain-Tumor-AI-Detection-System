@@ -12,11 +12,45 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RL
 from reportlab.lib.styles import getSampleStyleSheet
 from skimage.transform import resize
 import io
-from download_models import download_models
+import gdown
 
-# Download models before anything else
-if not download_models():
-    st.stop()
+# Download models from Google Drive
+def download_models():
+    """Download models from Google Drive if not present"""
+    
+    # REPLACE THESE WITH YOUR ACTUAL GOOGLE DRIVE FILE IDs
+    SEG_MODEL_ID = "YOUR_SEGMENTATION_MODEL_FILE_ID_HERE"
+    QUANTUM_MODEL_ID = "YOUR_QUANTUM_MODEL_FILE_ID_HERE"
+    
+    seg_model_path = 'resnet_segmentation_model.pth'
+    quantum_model_path = 'quantum_classifier_fixed.pth'
+    
+    # Download segmentation model
+    if not os.path.exists(seg_model_path):
+        try:
+            st.info("📥 Downloading segmentation model (first time only, ~100MB)...")
+            url = f'https://drive.google.com/uc?id={SEG_MODEL_ID}'
+            gdown.download(url, seg_model_path, quiet=False)
+            st.success("✅ Segmentation model downloaded!")
+        except Exception as e:
+            st.error(f"❌ Failed to download segmentation model: {str(e)}")
+            st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
+            return False
+    
+    # Download quantum model
+    if not os.path.exists(quantum_model_path):
+        try:
+            st.info("📥 Downloading quantum classifier (first time only, ~3MB)...")
+            url = f'https://drive.google.com/uc?id={QUANTUM_MODEL_ID}'
+            gdown.download(url, quantum_model_path, quiet=False)
+            st.success("✅ Quantum classifier downloaded!")
+        except Exception as e:
+            st.error(f"❌ Failed to download quantum model: {str(e)}")
+            st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
+            return False
+    
+    return True
+
 # Initialize
 @st.cache_resource
 def load_predictor():
@@ -121,6 +155,18 @@ def main():
         initial_sidebar_state="expanded"
     )
     
+    # Download models first
+    if not download_models():
+        st.error("Failed to download models. Please check your Google Drive file IDs.")
+        st.info("""
+        **Instructions to fix:**
+        1. Upload your model files to Google Drive
+        2. Right-click each file → Share → Set to 'Anyone with the link'
+        3. Copy the file ID from the share link
+        4. Update the file IDs in the code (lines 19-20)
+        """)
+        st.stop()
+    
     # Custom CSS
     st.markdown("""
         <style>
@@ -146,7 +192,7 @@ def main():
     
     if predictor is None or db is None:
         st.error("Failed to load models or database. Please check your model files.")
-        st.info("Required files: 'resnet_segmentation_model.pth' and 'quantum_classifier_fixed.pth'")
+        st.info("Models should be downloaded automatically from Google Drive.")
         st.stop()
     
     # Header
