@@ -23,6 +23,7 @@ static/masks/*
 .env.local
 *.key
 *.pem
+secrets.toml
 
 # Python
 __pycache__/
