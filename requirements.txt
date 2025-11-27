@@ -8,3 +8,4 @@ matplotlib==3.8.2
 pandas==2.1.4
 scikit-image==0.22.0
 reportlab==4.0.9
+gdown==4.7.1
