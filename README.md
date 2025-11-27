@@ -34,13 +34,13 @@ This system demonstrates a complete AI pipeline for brain tumor detection and cl
 
 ## Features
 
-- ** Tumor Detection**: Automatically identifies tumor regions in brain MRI scans
-- ** Grade Classification**: Classifies tumors into Grade 1 or Grade 2 using quantum computing
-- ** Visual Analysis**: Interactive visualization with tumor overlay on original scans
-- ** PDF Reports**: Generates downloadable medical-style analysis reports
-- ** Patient Database**: Stores and manages prediction history with SQLite
-- ** Statistics Dashboard**: Comprehensive analytics and summary statistics
-- ** Quantum Enhanced**: Uses 4-qubit quantum neural network for classification
+- Tumor Detection**: Automatically identifies tumor regions in brain MRI scans
+- Grade Classification**: Classifies tumors into Grade 1 or Grade 2 using quantum computing
+- Visual Analysis**: Interactive visualization with tumor overlay on original scans
+- PDF Reports**: Generates downloadable medical-style analysis reports
+- Patient Database**: Stores and manages prediction history with SQLite
+- Statistics Dashboard**: Comprehensive analytics and summary statistics
+- Quantum Enhanced**: Uses 4-qubit quantum neural network for classification
 
 ---
 
