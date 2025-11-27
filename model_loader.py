@@ -38,16 +38,16 @@ class AttentionBlock(nn.Module):
         psi = self.psi(psi)
         return x * psi
 
-# Define the segmentation model architecture (matching saved model)
+# Define the segmentation model architecture (matching saved model with 1 channel input)
 class ImprovedResUNet(nn.Module):
-    def __init__(self, num_classes=1):
+    def __init__(self, num_classes=1, in_channels=1):
         super(ImprovedResUNet, self).__init__()
         
-        # Load pretrained ResNet50
+        # Load pretrained ResNet50 and modify first conv for grayscale
         resnet = models.resnet50(pretrained=False)
         
-        # Encoder - store as direct attributes
-        self.conv1 = resnet.conv1
+        # Encoder - modify conv1 for single channel input
+        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = resnet.bn1
         self.relu = resnet.relu
         self.maxpool = resnet.maxpool
@@ -61,9 +61,9 @@ class ImprovedResUNet(nn.Module):
         self.att3 = AttentionBlock(512, 512, 256)
         self.att2 = AttentionBlock(256, 256, 128)
         
-        # Decoder
+        # Decoder - match the saved model structure
         self.up1 = nn.Sequential(
-            nn.ConvTranspose2d(2048, 1024, kernel_size=2, stride=2),
+            nn.Conv2d(2048, 1024, kernel_size=3, padding=1),
             nn.BatchNorm2d(1024),
             nn.ReLU(inplace=True)
         )
@@ -83,7 +83,7 @@ class ImprovedResUNet(nn.Module):
             nn.ReLU(inplace=True)
         )
         self.up5 = nn.Sequential(
-            nn.Conv2d(192, 64, kernel_size=3, padding=1),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True)
         )
@@ -105,8 +105,9 @@ class ImprovedResUNet(nn.Module):
         x4 = self.layer3(x3)
         x5 = self.layer4(x4)
         
-        # Decoder with attention
+        # Decoder with attention and upsampling
         d5 = self.up1(x5)
+        d5 = nn.functional.interpolate(d5, scale_factor=2, mode='bilinear', align_corners=True)
         x4_att = self.att4(d5, x4)
         d5 = torch.cat([d5, x4_att], dim=1)
         d5 = self.up2(d5)
@@ -122,7 +123,6 @@ class ImprovedResUNet(nn.Module):
         d3 = self.up4(d3)
         
         d2 = nn.functional.interpolate(d3, scale_factor=2, mode='bilinear', align_corners=True)
-        d2 = torch.cat([d2, x1], dim=1)
         d2 = self.up5(d2)
         
         d1 = nn.functional.interpolate(d2, scale_factor=2, mode='bilinear', align_corners=True)
@@ -139,6 +139,9 @@ class QuantumClassifier(nn.Module):
         
         # Define quantum device
         self.dev = qml.device('default.qubit', wires=n_qubits)
+        
+        # Quantum weights (named 'weights' to match saved model)
+        self.weights = nn.Parameter(torch.randn(n_layers, n_qubits, 2) * 0.1)
         
         # Define quantum circuit
         @qml.qnode(self.dev, interface='torch')
@@ -160,24 +163,12 @@ class QuantumClassifier(nn.Module):
             return qml.expval(qml.PauliZ(0))
         
         self.circuit = circuit
-        self.weight_shapes = {"weights": (n_layers, n_qubits, 2)}
-        
-        # Classical preprocessing
-        self.fc1 = nn.Linear(256, 64)
-        self.fc2 = nn.Linear(64, n_qubits)
-        
-        # Initialize quantum weights
-        self.q_weights = nn.Parameter(torch.randn(n_layers, n_qubits, 2) * 0.1)
         
     def forward(self, x):
-        # Classical preprocessing
-        x = torch.relu(self.fc1(x))
-        x = torch.tanh(self.fc2(x))
-        
-        # Quantum processing
+        # Quantum processing directly (no classical preprocessing in saved model)
         outputs = []
         for sample in x:
-            output = self.circuit(sample, self.q_weights)
+            output = self.circuit(sample, self.weights)
             outputs.append(output)
         
         return torch.stack(outputs).unsqueeze(1)
@@ -188,7 +179,7 @@ class BrainTumorPredictor:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Load segmentation model
-        self.seg_model = ImprovedResUNet(num_classes=1)
+        self.seg_model = ImprovedResUNet(num_classes=1, in_channels=1)
         if os.path.exists(seg_model_path):
             try:
                 checkpoint = torch.load(seg_model_path, map_location=self.device)
@@ -196,6 +187,7 @@ class BrainTumorPredictor:
                     self.seg_model.load_state_dict(checkpoint['model_state_dict'])
                 else:
                     self.seg_model.load_state_dict(checkpoint)
+                st.success("✅ Segmentation model loaded successfully!")
             except Exception as e:
                 st.error(f"Error loading segmentation model: {str(e)}")
         self.seg_model.to(self.device)
@@ -210,12 +202,13 @@ class BrainTumorPredictor:
                     self.quantum_model.load_state_dict(checkpoint['model_state_dict'])
                 else:
                     self.quantum_model.load_state_dict(checkpoint)
+                st.success("✅ Quantum model loaded successfully!")
             except Exception as e:
                 st.error(f"Error loading quantum model: {str(e)}")
         self.quantum_model.to(self.device)
         self.quantum_model.eval()
         
-        # Define transforms
+        # Define transforms for grayscale
         self.transform = transforms.Compose([
             transforms.Resize((512, 512)),
             transforms.ToTensor(),
@@ -225,12 +218,11 @@ class BrainTumorPredictor:
     def predict(self, image_path):
         """Run complete prediction pipeline"""
         try:
-            # Load and preprocess image
+            # Load and preprocess image as grayscale
             image = Image.open(image_path).convert('L')
             image_tensor = self.transform(image).unsqueeze(0).to(self.device)
             
-            # Expand to 3 channels for ResNet
-            image_tensor = image_tensor.repeat(1, 3, 1, 1)
+            # Keep as 1 channel for grayscale model
             
             # Segmentation
             with torch.no_grad():
@@ -274,7 +266,6 @@ class BrainTumorPredictor:
     
     def extract_features(self, tumor_mask):
         """Extract features from tumor mask for classification"""
-        # Simple feature extraction
         features = []
         
         # Statistical features
@@ -283,28 +274,18 @@ class BrainTumorPredictor:
         features.append(np.max(tumor_mask))
         features.append(np.min(tumor_mask))
         
-        # Shape features
-        binary_mask = (tumor_mask > 0.5).astype(np.uint8)
-        features.append(np.sum(binary_mask))
-        
-        # Pad to 256 features
-        while len(features) < 256:
-            features.extend(features[:min(5, 256 - len(features))])
-        
-        return torch.tensor(features[:256], dtype=torch.float32)
+        return torch.tensor(features[:4], dtype=torch.float32)
 
 
 def download_models():
     """Download models from Google Drive if not present"""
     
-    # Google Drive file IDs
     SEG_MODEL_ID = "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R"
     QUANTUM_MODEL_ID = "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs"
     
     seg_model_path = 'resnet_segmentation_model.pth'
     quantum_model_path = 'quantum_classifier_fixed.pth'
     
-    # Download segmentation model
     if not os.path.exists(seg_model_path):
         try:
             st.info("📥 Downloading segmentation model (first time only, ~100MB)...")
@@ -313,10 +294,8 @@ def download_models():
             st.success("✅ Segmentation model downloaded!")
         except Exception as e:
             st.error(f"❌ Failed to download segmentation model: {str(e)}")
-            st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
             return False
     
-    # Download quantum model
     if not os.path.exists(quantum_model_path):
         try:
             st.info("📥 Downloading quantum classifier (first time only, ~3MB)...")
@@ -325,7 +304,6 @@ def download_models():
             st.success("✅ Quantum classifier downloaded!")
         except Exception as e:
             st.error(f"❌ Failed to download quantum model: {str(e)}")
-            st.info("Please make sure the Google Drive link is set to 'Anyone with the link can view'")
             return False
     
     return True
