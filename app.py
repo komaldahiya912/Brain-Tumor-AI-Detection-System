@@ -241,7 +241,7 @@ def main():
     <div style="text-align: center; color: #666; padding: 20px;">
     <p><b>Brain Tumor AI Detection System v1.0</b></p>
     <p>Powered by Deep Learning & Quantum Computing</p>
-    <p style="font-size: 0.8em;">© 2024 Komal Dahiya | Licensed under GPL-3.0</p>
+    <p style="font-size: 0.8em;">© 2025 Komal Dahiya | Licensed under GPL-3.0</p>
     </div>
     """, unsafe_allow_html=True)
     
