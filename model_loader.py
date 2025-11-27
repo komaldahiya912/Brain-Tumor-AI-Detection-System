@@ -6,8 +6,6 @@ import pennylane as qml
 from pennylane import numpy as pnp
 import numpy as np
 from PIL import Image
-import torch.nn.functional as F
-
 
 # ==============================================================
 # ATTENTION BLOCK
@@ -241,5 +239,4 @@ class BrainTumorPredictor:
                 'tumor_ratio': tumor_ratio
             }
         }
-
 
