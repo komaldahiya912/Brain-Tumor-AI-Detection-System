@@ -1,36 +1,25 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
-from torchvision import transforms
-from PIL import Image
-import numpy as np
+from torchvision.models import resnet50, ResNet50_Weights
+import torchvision.transforms as transforms
 import pennylane as qml
-import os
+from pennylane import numpy as pnp
+import numpy as np
+from PIL import Image
 import gdown
-import streamlit as st
+import os
 
-# Attention Block for the segmentation model
+# ==============================================================
+# ATTENTION BLOCK
+# ==============================================================
 class AttentionBlock(nn.Module):
     def __init__(self, F_g, F_l, F_int):
-        super(AttentionBlock, self).__init__()
-        self.W_g = nn.Sequential(
-            nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm2d(F_int)
-        )
-        
-        self.W_x = nn.Sequential(
-            nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm2d(F_int)
-        )
-        
-        self.psi = nn.Sequential(
-            nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
-            nn.BatchNorm2d(1),
-            nn.Sigmoid()
-        )
-        
+        super().__init__()
+        self.W_g = nn.Sequential(nn.Conv2d(F_g, F_int, 1, bias=True), nn.BatchNorm2d(F_int))
+        self.W_x = nn.Sequential(nn.Conv2d(F_l, F_int, 1, bias=True), nn.BatchNorm2d(F_int))
+        self.psi = nn.Sequential(nn.Conv2d(F_int, 1, 1, bias=True), nn.BatchNorm2d(1), nn.Sigmoid())
         self.relu = nn.ReLU(inplace=True)
-        
+    
     def forward(self, g, x):
         g1 = self.W_g(g)
         x1 = self.W_x(x)
@@ -38,272 +27,253 @@ class AttentionBlock(nn.Module):
         psi = self.psi(psi)
         return x * psi
 
-# Define the segmentation model architecture (matching saved model with 1 channel input)
+# ==============================================================
+# IMPROVED RESUNET (SEGMENTATION MODEL)
+# ==============================================================
 class ImprovedResUNet(nn.Module):
-    def __init__(self, num_classes=1, in_channels=1):
-        super(ImprovedResUNet, self).__init__()
-        
-        # Load pretrained ResNet50 and modify first conv for grayscale
-        resnet = models.resnet50(pretrained=False)
-        
-        # Encoder - modify conv1 for single channel input
-        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = resnet.bn1
-        self.relu = resnet.relu
-        self.maxpool = resnet.maxpool
-        self.layer1 = resnet.layer1
-        self.layer2 = resnet.layer2
-        self.layer3 = resnet.layer3
-        self.layer4 = resnet.layer4
-        
-        # Attention gates
+    def __init__(self, pretrained=True):
+        super().__init__()
+        backbone = resnet50(weights=ResNet50_Weights.DEFAULT if pretrained else None)
+        old = backbone.conv1
+        backbone.conv1 = nn.Conv2d(1, 64, 7, 2, 3, bias=False)
+        backbone.conv1.weight.data = old.weight.data.mean(dim=1, keepdim=True)
+
+        self.conv1 = backbone.conv1
+        self.bn1 = backbone.bn1
+        self.relu = backbone.relu
+        self.maxpool = backbone.maxpool
+        self.layer1 = backbone.layer1
+        self.layer2 = backbone.layer2
+        self.layer3 = backbone.layer3
+        self.layer4 = backbone.layer4
+
         self.att4 = AttentionBlock(1024, 1024, 512)
         self.att3 = AttentionBlock(512, 512, 256)
         self.att2 = AttentionBlock(256, 256, 128)
-        
-        # Decoder - match the saved model structure
+
         self.up1 = nn.Sequential(
-            nn.Conv2d(2048, 1024, kernel_size=3, padding=1),
-            nn.BatchNorm2d(1024),
-            nn.ReLU(inplace=True)
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            nn.Conv2d(2048, 1024, 3, padding=1), nn.BatchNorm2d(1024), nn.ReLU(inplace=True),
+            nn.Dropout2d(0.3)
         )
         self.up2 = nn.Sequential(
-            nn.Conv2d(2048, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True)
+            nn.Conv2d(2048, 512, 3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Dropout2d(0.2),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         )
         self.up3 = nn.Sequential(
-            nn.Conv2d(1024, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True)
+            nn.Conv2d(1024, 256, 3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
+            nn.Dropout2d(0.1),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         )
         self.up4 = nn.Sequential(
-            nn.Conv2d(512, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True)
+            nn.Conv2d(512, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         )
         self.up5 = nn.Sequential(
-            nn.Conv2d(128, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True)
+            nn.Conv2d(128, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         )
-        
-        # Final output
         self.final = nn.Sequential(
-            nn.Conv2d(64, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, num_classes, kernel_size=1)
+            nn.Conv2d(64, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 1, 1)
         )
-    
+
     def forward(self, x):
-        # Encoder
-        x1 = self.relu(self.bn1(self.conv1(x)))
-        x2 = self.maxpool(x1)
-        x2 = self.layer1(x2)
+        x1 = self.maxpool(self.relu(self.bn1(self.conv1(x))))
+        x2 = self.layer1(x1)
         x3 = self.layer2(x2)
         x4 = self.layer3(x3)
         x5 = self.layer4(x4)
-        
-        # Decoder with attention and upsampling
-        d5 = self.up1(x5)
-        d5 = nn.functional.interpolate(d5, scale_factor=2, mode='bilinear', align_corners=True)
-        x4_att = self.att4(d5, x4)
-        d5 = torch.cat([d5, x4_att], dim=1)
-        d5 = self.up2(d5)
-        
-        d4 = nn.functional.interpolate(d5, scale_factor=2, mode='bilinear', align_corners=True)
-        x3_att = self.att3(d4, x3)
-        d4 = torch.cat([d4, x3_att], dim=1)
-        d4 = self.up3(d4)
-        
-        d3 = nn.functional.interpolate(d4, scale_factor=2, mode='bilinear', align_corners=True)
-        x2_att = self.att2(d3, x2)
-        d3 = torch.cat([d3, x2_att], dim=1)
-        d3 = self.up4(d3)
-        
-        d2 = nn.functional.interpolate(d3, scale_factor=2, mode='bilinear', align_corners=True)
-        d2 = self.up5(d2)
-        
-        d1 = nn.functional.interpolate(d2, scale_factor=2, mode='bilinear', align_corners=True)
-        
-        return torch.sigmoid(self.final(d1))
 
+        d1 = self.up1(x5)
+        d1 = torch.cat([d1, self.att4(d1, x4)], dim=1)
 
-# Define the quantum classifier
+        d2 = self.up2(d1)
+        d2 = torch.cat([d2, self.att3(d2, x3)], dim=1)
+
+        d3 = self.up3(d2)
+        d3 = torch.cat([d3, self.att2(d3, x2)], dim=1)
+
+        d4 = self.up4(d3)
+        d5 = self.up5(d4)
+
+        logits = self.final(d5)
+        return logits, x5
+
+# ==============================================================
+# QUANTUM CIRCUIT
+# ==============================================================
+n_qubits = 4
+dev = qml.device('default.qubit', wires=n_qubits)
+
+@qml.qnode(dev, interface='torch', diff_method='backprop')
+def quantum_circuit(inputs, weights):
+    """Quantum circuit for binary classification"""
+    for i in range(n_qubits):
+        qml.RY(np.pi * inputs[i], wires=i)
+    
+    for layer in range(2):
+        for i in range(n_qubits):
+            qml.RY(weights[layer * n_qubits * 2 + i], wires=i)
+            qml.RZ(weights[layer * n_qubits * 2 + n_qubits + i], wires=i)
+        for i in range(n_qubits - 1):
+            qml.CNOT(wires=[i, i+1])
+        qml.CNOT(wires=[n_qubits-1, 0])
+    
+    return qml.expval(qml.PauliZ(0))
+
 class QuantumClassifier(nn.Module):
-    def __init__(self, n_qubits=4, n_layers=2):
-        super(QuantumClassifier, self).__init__()
+    def __init__(self, n_qubits):
+        super().__init__()
         self.n_qubits = n_qubits
-        self.n_layers = n_layers
-        
-        # Define quantum device
-        self.dev = qml.device('default.qubit', wires=n_qubits)
-        
-        # Quantum weights (named 'weights' to match saved model)
-        self.weights = nn.Parameter(torch.randn(n_layers, n_qubits, 2) * 0.1)
-        
-        # Define quantum circuit
-        @qml.qnode(self.dev, interface='torch')
-        def circuit(inputs, weights):
-            # Encode inputs
-            for i in range(n_qubits):
-                qml.RY(inputs[i], wires=i)
-            
-            # Variational layers
-            for layer in range(n_layers):
-                for i in range(n_qubits):
-                    qml.RY(weights[layer, i, 0], wires=i)
-                    qml.RZ(weights[layer, i, 1], wires=i)
-                
-                for i in range(n_qubits - 1):
-                    qml.CNOT(wires=[i, i + 1])
-                qml.CNOT(wires=[n_qubits - 1, 0])
-            
-            return qml.expval(qml.PauliZ(0))
-        
-        self.circuit = circuit
-        
+        n_params = 2 * 2 * n_qubits
+        self.weights = nn.Parameter(0.01 * torch.randn(n_params))
+    
     def forward(self, x):
-        # Quantum processing directly (no classical preprocessing in saved model)
+        """Process batch of features through quantum circuit"""
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+        
+        batch_size = x.shape[0]
         outputs = []
-        for sample in x:
-            output = self.circuit(sample, self.weights)
-            outputs.append(output)
         
-        return torch.stack(outputs).unsqueeze(1)
+        for i in range(batch_size):
+            result = quantum_circuit(x[i], self.weights)
+            outputs.append(result)
+        
+        return torch.stack(outputs)
 
-
-class BrainTumorPredictor:
-    def __init__(self, seg_model_path, quantum_model_path):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Load segmentation model
-        self.seg_model = ImprovedResUNet(num_classes=1, in_channels=1)
-        if os.path.exists(seg_model_path):
-            try:
-                checkpoint = torch.load(seg_model_path, map_location=self.device)
-                if 'model_state_dict' in checkpoint:
-                    self.seg_model.load_state_dict(checkpoint['model_state_dict'])
-                else:
-                    self.seg_model.load_state_dict(checkpoint)
-                st.success("✅ Segmentation model loaded successfully!")
-            except Exception as e:
-                st.error(f"Error loading segmentation model: {str(e)}")
-        self.seg_model.to(self.device)
-        self.seg_model.eval()
-        
-        # Load quantum classifier
-        self.quantum_model = QuantumClassifier(n_qubits=4, n_layers=2)
-        if os.path.exists(quantum_model_path):
-            try:
-                checkpoint = torch.load(quantum_model_path, map_location=self.device)
-                if 'model_state_dict' in checkpoint:
-                    self.quantum_model.load_state_dict(checkpoint['model_state_dict'])
-                else:
-                    self.quantum_model.load_state_dict(checkpoint)
-                st.success("✅ Quantum model loaded successfully!")
-            except Exception as e:
-                st.error(f"Error loading quantum model: {str(e)}")
-        self.quantum_model.to(self.device)
-        self.quantum_model.eval()
-        
-        # Define transforms for grayscale
-        self.transform = transforms.Compose([
-            transforms.Resize((512, 512)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
-        ])
-    
-    def predict(self, image_path):
-        """Run complete prediction pipeline"""
-        try:
-            # Load and preprocess image as grayscale
-            image = Image.open(image_path).convert('L')
-            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
-            
-            # Keep as 1 channel for grayscale model
-            
-            # Segmentation
-            with torch.no_grad():
-                tumor_mask = self.seg_model(image_tensor)
-                tumor_mask = tumor_mask.squeeze().cpu().numpy()
-            
-            # Calculate tumor statistics
-            tumor_area = np.sum(tumor_mask > 0.5)
-            tumor_present = tumor_area > 50
-            
-            seg_stats = {
-                'mean_prob': float(np.mean(tumor_mask)),
-                'std_prob': float(np.std(tumor_mask)),
-                'max_prob': float(np.max(tumor_mask)),
-                'tumor_ratio': float(tumor_area / (512 * 512))
-            }
-            
-            # Classification
-            if tumor_present:
-                features = self.extract_features(tumor_mask)
-                with torch.no_grad():
-                    grade_output = self.quantum_model(features.unsqueeze(0).to(self.device))
-                    grade_prob = torch.sigmoid(grade_output).item()
-                    predicted_grade = 2 if grade_prob > 0.5 else 1
-                    grade_confidence = grade_prob if predicted_grade == 2 else (1 - grade_prob)
-            else:
-                predicted_grade = 0
-                grade_confidence = 0.0
-            
-            return {
-                'tumor_present': tumor_present,
-                'tumor_mask': tumor_mask,
-                'tumor_area': float(tumor_area),
-                'predicted_grade': predicted_grade,
-                'grade_confidence': float(grade_confidence),
-                'segmentation_stats': seg_stats
-            }
-            
-        except Exception as e:
-            raise Exception(f"Prediction error: {str(e)}")
-    
-    def extract_features(self, tumor_mask):
-        """Extract features from tumor mask for classification"""
-        features = []
-        
-        # Statistical features
-        features.append(np.mean(tumor_mask))
-        features.append(np.std(tumor_mask))
-        features.append(np.max(tumor_mask))
-        features.append(np.min(tumor_mask))
-        
-        return torch.tensor(features[:4], dtype=torch.float32)
-
-
-def download_models():
+# ==============================================================
+# DOWNLOAD MODELS FROM GOOGLE DRIVE
+# ==============================================================
+def download_models_from_gdrive():
     """Download models from Google Drive if not present"""
     
+    # YOUR GOOGLE DRIVE FILE IDs (replace with your actual IDs)
     SEG_MODEL_ID = "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R"
     QUANTUM_MODEL_ID = "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs"
     
     seg_model_path = 'resnet_segmentation_model.pth'
     quantum_model_path = 'quantum_classifier_fixed.pth'
     
+    # Download segmentation model
     if not os.path.exists(seg_model_path):
-        try:
-            st.info("📥 Downloading segmentation model (first time only, ~100MB)...")
-            url = f'https://drive.google.com/uc?id={SEG_MODEL_ID}'
-            gdown.download(url, seg_model_path, quiet=False)
-            st.success("✅ Segmentation model downloaded!")
-        except Exception as e:
-            st.error(f"❌ Failed to download segmentation model: {str(e)}")
-            return False
+        print("📥 Downloading segmentation model from Google Drive (~675MB)...")
+        url = f'https://drive.google.com/uc?id={SEG_MODEL_ID}'
+        gdown.download(url, seg_model_path, quiet=False)
+        print("✅ Segmentation model downloaded!")
+    else:
+        print("✅ Segmentation model already exists")
     
+    # Download quantum model
     if not os.path.exists(quantum_model_path):
-        try:
-            st.info("📥 Downloading quantum classifier (first time only, ~3MB)...")
-            url = f'https://drive.google.com/uc?id={QUANTUM_MODEL_ID}'
-            gdown.download(url, quantum_model_path, quiet=False)
-            st.success("✅ Quantum classifier downloaded!")
-        except Exception as e:
-            st.error(f"❌ Failed to download quantum model: {str(e)}")
-            return False
+        print("📥 Downloading quantum classifier from Google Drive (~3KB)...")
+        url = f'https://drive.google.com/uc?id={QUANTUM_MODEL_ID}'
+        gdown.download(url, quantum_model_path, quiet=False)
+        print("✅ Quantum classifier downloaded!")
+    else:
+        print("✅ Quantum classifier already exists")
     
-    return True
+    return seg_model_path, quantum_model_path
+
+# ==============================================================
+# BRAIN TUMOR PREDICTOR
+# ==============================================================
+class BrainTumorPredictor:
+    def __init__(self, seg_model_path=None, quantum_model_path=None):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using device: {self.device}")
+        
+        # Download models from Google Drive if paths not provided
+        if seg_model_path is None or quantum_model_path is None:
+            seg_model_path, quantum_model_path = download_models_from_gdrive()
+        
+        self.seg_model_path = seg_model_path
+        self.quantum_model_path = quantum_model_path
+        
+        self.load_models()
+        
+    def load_models(self):
+        """Load both segmentation and quantum models"""
+        # Load segmentation model
+        self.seg_model = ImprovedResUNet(pretrained=False)
+        seg_checkpoint = torch.load(self.seg_model_path, map_location=self.device, weights_only=False)
+        
+        if isinstance(seg_checkpoint, dict) and 'model_state_dict' in seg_checkpoint:
+            self.seg_model.load_state_dict(seg_checkpoint['model_state_dict'])
+            print(f"Segmentation model loaded (Dice: {seg_checkpoint.get('dice', 'N/A')})")
+        else:
+            self.seg_model.load_state_dict(seg_checkpoint)
+            print("Segmentation model loaded")
+        
+        self.seg_model.to(self.device)
+        self.seg_model.eval()
+        
+        # Load quantum classifier
+        self.quantum_model = QuantumClassifier(n_qubits)
+        quantum_checkpoint = torch.load(self.quantum_model_path, map_location=self.device, weights_only=False)
+        
+        if isinstance(quantum_checkpoint, dict) and 'model_state_dict' in quantum_checkpoint:
+            self.quantum_model.load_state_dict(quantum_checkpoint['model_state_dict'])
+            print(f"Quantum classifier loaded (Accuracy: {quantum_checkpoint.get('accuracy', 'N/A')})")
+        else:
+            self.quantum_model.load_state_dict(quantum_checkpoint)
+            print("Quantum classifier loaded")
+        
+        self.quantum_model.to(self.device)
+        self.quantum_model.eval()
+        
+        # Transform
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+    
+    def predict(self, image_path):
+        """
+        Make prediction on brain MRI image
+        Returns dict with tumor detection and grade classification
+        """
+        # Load and preprocess image
+        img = Image.open(image_path).convert('L')
+        img_tensor = self.transform(img).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            # 1. Segmentation - detect tumor
+            seg_logits, _ = self.seg_model(img_tensor)
+            seg_probs = torch.sigmoid(seg_logits).squeeze().cpu().numpy()
+            
+            # 2. Extract features for quantum classifier
+            mean_prob = float(seg_probs.mean())
+            std_prob = float(seg_probs.std())
+            max_prob = float(seg_probs.max())
+            tumor_ratio = float((seg_probs > 0.5).mean())
+            
+            features = torch.tensor([mean_prob, std_prob, max_prob, tumor_ratio], 
+                                   dtype=torch.float32)
+            features = torch.clamp(features, 0, 1).unsqueeze(0).to(self.device)
+            
+            # 3. Quantum classification - predict grade
+            quantum_output = self.quantum_model(features)
+            grade_prob = torch.sigmoid(quantum_output).item()
+            predicted_grade = 2 if grade_prob > 0.5 else 1
+            
+            # 4. Tumor detection (threshold: 50 pixels with >0.5 probability)
+            tumor_present = (seg_probs > 0.5).sum() > 50
+            tumor_area = float((seg_probs > 0.5).sum())
+        
+        return {
+            'tumor_present': bool(tumor_present),
+            'tumor_mask': seg_probs,
+            'predicted_grade': int(predicted_grade),
+            'grade_confidence': float(grade_prob),
+            'tumor_area': float(tumor_area),
+            'segmentation_stats': {
+                'mean_prob': mean_prob,
+                'std_prob': std_prob,
+                'max_prob': max_prob,
+                'tumor_ratio': tumor_ratio
+            }
+        }
