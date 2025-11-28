@@ -187,7 +187,7 @@ def main():
             with col1:
                 st.subheader("Original MRI Scan")
                 original_img = Image.open(upload_path).convert('L')
-                st.image(original_img, use_container_width=True)
+                st.image(original_img, use_column_width=True)
             
             if st.button("Analyze MRI Scan", type="primary"):
                 with st.spinner("Running AI analysis... This may take a moment..."):
@@ -199,7 +199,7 @@ def main():
                             st.subheader("Analysis Results")
                             original_array = np.array(original_img)
                             overlay_buf = create_overlay_image(original_array, results['tumor_mask'])
-                            st.image(overlay_buf, use_container_width=True)
+                            st.image(overlay_buf, use_column_width=True)
                         
                         st.markdown("---")
                         st.subheader("Analysis Summary")
