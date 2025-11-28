@@ -150,25 +150,22 @@ class QuantumClassifier(nn.Module):
 def download_models_from_gdrive():
     """Download models from Google Drive if not present"""
     
-    # YOUR GOOGLE DRIVE FILE IDs (replace with your actual IDs)
     SEG_MODEL_ID = "1jHuqYKhHcQIdy-8dji51Mz2QyOh7Iq3R"
     QUANTUM_MODEL_ID = "1l9FQMMEuPg0TSQzflfCWCzmHNyP2Brgs"
     
     seg_model_path = 'resnet_segmentation_model.pth'
     quantum_model_path = 'quantum_classifier_fixed.pth'
     
-    # Download segmentation model
     if not os.path.exists(seg_model_path):
-        print("📥 Downloading segmentation model from Google Drive (~675MB)...")
+        print("📥 Downloading segmentation model from Google Drive...")
         url = f'https://drive.google.com/uc?id={SEG_MODEL_ID}'
         gdown.download(url, seg_model_path, quiet=False)
         print("✅ Segmentation model downloaded!")
     else:
         print("✅ Segmentation model already exists")
     
-    # Download quantum model
     if not os.path.exists(quantum_model_path):
-        print("📥 Downloading quantum classifier from Google Drive (~3KB)...")
+        print("📥 Downloading quantum classifier from Google Drive...")
         url = f'https://drive.google.com/uc?id={QUANTUM_MODEL_ID}'
         gdown.download(url, quantum_model_path, quiet=False)
         print("✅ Quantum classifier downloaded!")
@@ -178,14 +175,13 @@ def download_models_from_gdrive():
     return seg_model_path, quantum_model_path
 
 # ==============================================================
-# BRAIN TUMOR PREDICTOR
+# BRAIN TUMOR PREDICTOR - WITH DIAGNOSTIC OUTPUT
 # ==============================================================
 class BrainTumorPredictor:
     def __init__(self, seg_model_path=None, quantum_model_path=None):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"Using device: {self.device}")
+        print(f"🔧 Using device: {self.device}")
         
-        # Download models from Google Drive if paths not provided
         if seg_model_path is None or quantum_model_path is None:
             seg_model_path, quantum_model_path = download_models_from_gdrive()
         
@@ -202,10 +198,10 @@ class BrainTumorPredictor:
         
         if isinstance(seg_checkpoint, dict) and 'model_state_dict' in seg_checkpoint:
             self.seg_model.load_state_dict(seg_checkpoint['model_state_dict'])
-            print(f"Segmentation model loaded (Dice: {seg_checkpoint.get('dice', 'N/A')})")
+            print(f"✅ Segmentation model loaded (Dice: {seg_checkpoint.get('dice', 'N/A')})")
         else:
             self.seg_model.load_state_dict(seg_checkpoint)
-            print("Segmentation model loaded")
+            print("✅ Segmentation model loaded")
         
         self.seg_model.to(self.device)
         self.seg_model.eval()
@@ -216,55 +212,84 @@ class BrainTumorPredictor:
         
         if isinstance(quantum_checkpoint, dict) and 'model_state_dict' in quantum_checkpoint:
             self.quantum_model.load_state_dict(quantum_checkpoint['model_state_dict'])
-            print(f"Quantum classifier loaded (Accuracy: {quantum_checkpoint.get('accuracy', 'N/A')})")
+            print(f"✅ Quantum classifier loaded (Accuracy: {quantum_checkpoint.get('accuracy', 'N/A')})")
         else:
             self.quantum_model.load_state_dict(quantum_checkpoint)
-            print("Quantum classifier loaded")
+            print("✅ Quantum classifier loaded")
         
         self.quantum_model.to(self.device)
         self.quantum_model.eval()
         
-        # Transform
+        # CRITICAL FIX: Use 512x512 like training, NOT 224x224
         self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((512, 512)),  # Match training size!
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5], std=[0.5])
         ])
     
     def predict(self, image_path):
         """
-        Make prediction on brain MRI image
-        Returns dict with tumor detection and grade classification
+        Make prediction on brain MRI image with diagnostic output
         """
+        print(f"\n🔍 Starting prediction for: {image_path}")
+        
         # Load and preprocess image
         img = Image.open(image_path).convert('L')
+        print(f"📐 Original image size: {img.size}")
+        
         img_tensor = self.transform(img).unsqueeze(0).to(self.device)
+        print(f"📊 Tensor shape: {img_tensor.shape}")
+        print(f"📊 Tensor range: [{img_tensor.min().item():.3f}, {img_tensor.max().item():.3f}]")
         
         with torch.no_grad():
-            # 1. Segmentation - detect tumor
+            # Segmentation
             seg_logits, _ = self.seg_model(img_tensor)
-            seg_probs = torch.sigmoid(seg_logits).squeeze().cpu().numpy()
+            print(f"📊 Segmentation logits shape: {seg_logits.shape}")
+            print(f"📊 Logits range: [{seg_logits.min().item():.3f}, {seg_logits.max().item():.3f}]")
             
-            # 2. Extract features for quantum classifier
+            seg_probs = torch.sigmoid(seg_logits).squeeze().cpu().numpy()
+            print(f"📊 Segmentation probs shape: {seg_probs.shape}")
+            print(f"📊 Probs range: [{seg_probs.min():.3f}, {seg_probs.max():.3f}]")
+            
+            # Calculate statistics
             mean_prob = float(seg_probs.mean())
             std_prob = float(seg_probs.std())
             max_prob = float(seg_probs.max())
-            tumor_ratio = float((seg_probs > 0.5).mean())
+            tumor_pixels = (seg_probs > 0.5).sum()
+            tumor_ratio = float(tumor_pixels / (512 * 512))
             
+            print(f"\n📈 Segmentation Statistics:")
+            print(f"   Mean probability: {mean_prob:.4f}")
+            print(f"   Std probability: {std_prob:.4f}")
+            print(f"   Max probability: {max_prob:.4f}")
+            print(f"   Pixels > 0.5: {tumor_pixels}")
+            print(f"   Tumor ratio: {tumor_ratio:.4f}")
+            
+            # ADJUSTED THRESHOLD: Lower from 50 to 10 pixels for better sensitivity
+            tumor_present = tumor_pixels > 10
+            tumor_area = float(tumor_pixels)
+            
+            print(f"\n🎯 Detection Result:")
+            print(f"   Tumor present: {tumor_present}")
+            print(f"   Tumor area: {tumor_area} pixels")
+            
+            # Extract features for quantum classifier
             features = torch.tensor([mean_prob, std_prob, max_prob, tumor_ratio], 
                                    dtype=torch.float32)
             features = torch.clamp(features, 0, 1).unsqueeze(0).to(self.device)
+            print(f"\n🔬 Features for quantum classifier: {features.squeeze().cpu().numpy()}")
             
-            # 3. Quantum classification - predict grade
+            # Quantum classification
             quantum_output = self.quantum_model(features)
             grade_prob = torch.sigmoid(quantum_output).item()
             predicted_grade = 2 if grade_prob > 0.5 else 1
             
-            # 4. Tumor detection (threshold: 50 pixels with >0.5 probability)
-            tumor_present = (seg_probs > 0.5).sum() > 50
-            tumor_area = float((seg_probs > 0.5).sum())
+            print(f"\n⚛️ Quantum Classification:")
+            print(f"   Quantum output: {quantum_output.item():.4f}")
+            print(f"   Grade probability: {grade_prob:.4f}")
+            print(f"   Predicted grade: {predicted_grade}")
         
-        return {
+        result = {
             'tumor_present': bool(tumor_present),
             'tumor_mask': seg_probs,
             'predicted_grade': int(predicted_grade),
@@ -277,3 +302,6 @@ class BrainTumorPredictor:
                 'tumor_ratio': tumor_ratio
             }
         }
+        
+        print(f"\n✅ Prediction complete!")
+        return result
