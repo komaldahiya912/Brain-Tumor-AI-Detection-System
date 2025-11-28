@@ -39,10 +39,7 @@ import io
 @st.cache_resource
 def load_predictor():
     """Load the predictor with trained models"""
-    return BrainTumorPredictor(
-        seg_model_path='D:/Documents/AIDS/brain_tumour_project/patients_images/brain_tumor_app/models/resnet_segmentation_model.pth',
-        quantum_model_path='D:/Documents/AIDS/brain_tumour_project/patients_images/brain_tumor_app/models/quantum_classifier_fixed.pth'
-    )
+    return BrainTumorPredictor()  # Will auto-download from Google Drive
 
 @st.cache_resource  
 def load_database():
