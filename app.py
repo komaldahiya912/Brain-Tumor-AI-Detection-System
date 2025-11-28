@@ -393,7 +393,7 @@ def main():
             
             **Training:**
             - Segmentation: 7 epochs, 85.71% Dice Score
-            - Quantum: 7 epochs, Binary classification
+            - Quantum: 3 epochs, 54% accuracy Binary classification
             
             **Loss Functions:**
             - Segmentation: Combined (BCE + Dice + Focal Tversky)
